@@ -8,7 +8,21 @@ Escritos para **SAP ECC**, em português, com ALV via `CL_SALV_TABLE` ou `REUSE_
 
 ---
 
-## Basis e administração
+## Coleções por módulo
+
+Objetos agrupados, um diretório por transação — cada um com fonte, README e `docs/`.
+
+| Repositório | Objetos |
+|---|---|
+| [**sap-fi-reports**](https://github.com/RafaelPiassi/sap-fi-reports) — FI / CO | ZFI007 · ZFI009N · ZFI009R · ZFI018 · ZFI036 · ZFI037 · ZFI039 · ZFI040 · ZFI044 · ZFI045 · ZFI048 · ZFF67 · ZCO01 |
+| [**sap-mm-reports**](https://github.com/RafaelPiassi/sap-mm-reports) — MM | ZMM113 · ZMM116 · ZMM118 · ZMM198 · ZMMR033 · ZMMR117 · ZMIGO_CARGA_PEDIDO · ZQM022 |
+| [**sap-sd-reports**](https://github.com/RafaelPiassi/sap-sd-reports) — SD | ZSD058 · ZSD117 · ZSD120 · ZSD126 · ZSD127 · ZSD128 · ZVA03 · ZMOSAIC |
+
+## Repositórios individuais
+
+Objetos maiores, cada um no seu próprio repositório.
+
+### Basis e administração
 
 | Objeto | O que faz |
 |---|---|
@@ -16,7 +30,7 @@ Escritos para **SAP ECC**, em português, com ALV via `CL_SALV_TABLE` ou `REUSE_
 | [ZBC002 — Saneamento de usuários](https://github.com/RafaelPiassi/sap-zbc002-saneamento-usuarios) | Validade máxima de 1 ano, sem logon há 90 dias, expirados. Ajuste individual ou em massa por `BAPI_USER_CHANGE`, carga de endereço por planilha e job diário com e-mail. |
 | [ZBASISCHECK — Check list diário de Basis](https://github.com/RafaelPiassi/sap-zbasischeck-checklist-basis) | Automatiza os 33 itens do check list diário de AMS: 24 verificações automáticas, diagnóstico em ALV, e-mail HTML/CSV e job diário. |
 
-## Localização Brasil
+### Localização Brasil
 
 | Objeto | O que faz |
 |---|---|
@@ -24,7 +38,7 @@ Escritos para **SAP ECC**, em português, com ALV via `CL_SALV_TABLE` ou `REUSE_
 | [ZFI049 — Inscrição Estadual × Centro](https://github.com/RafaelPiassi/sap-zfi049-inscricao-estadual) | Confere e corrige IE, IM e CNPJ dos locais de negócios (`J_1BBRANCH`) de todos os centros de uma empresa, numa tela só. Aponta IE sem zeros à esquerda. |
 | [ZFI050 — IE dos parceiros do centro](https://github.com/RafaelPiassi/sap-zfi050-ie-parceiros-centro) | Companheira da ZFI049: corrigir a `J_1BBRANCH` arruma o destinatário da NF-e, mas **não** o local de entrega, que vem de `T001W-KUNNR` → `KNA1-STCD3`. Iguala os dois via `CMD_EI_API`/`VMD_EI_API`. |
 
-## Materiais e estoque
+### Materiais e estoque
 
 | Objeto | O que faz |
 |---|---|
@@ -32,7 +46,7 @@ Escritos para **SAP ECC**, em português, com ALV via `CL_SALV_TABLE` ou `REUSE_
 | [ZMM119 — Lotes em estoque](https://github.com/RafaelPiassi/sap-zmm119-lotes-em-estoque) | Consolida MB52, MB58 e MB51 numa tela só. Lê **todos** os tipos de estoque da `MCHB` — não só a utilização livre — e expõe a classificação do lote como colunas filtráveis. |
 | [ZMM122 — Expansão de cadastros](https://github.com/RafaelPiassi/sap-zmm122-expansao-cadastros) | Estende material, cliente e fornecedor a novas organizações copiando de um registro de referência, com de-para de campos dinâmico. |
 
-## Cadastros e ferramentas
+### Cadastros e ferramentas
 
 | Objeto | O que faz |
 |---|---|
