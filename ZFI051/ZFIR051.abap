@@ -424,6 +424,10 @@ START-OF-SELECTION.
 
   IF p_msep = abap_true.
     PERFORM montar_saida_separada.      " dois blocos independentes
+*   Os dois lados sao independentes, entao um pode vir vazio sem que o
+*   outro perceba. Registrar a contagem dos DOIS aqui e o que evita o
+*   "so trouxe a ZSD034" sem explicacao.
+    PERFORM contar_lados.
   ELSE.
     PERFORM montar_saida.               " uma saida cruzada
   ENDIF.
@@ -503,6 +507,35 @@ FORM mostrar_log.
   CLEAR gt_log.
 
   MESSAGE lv_txt TYPE 'I'.
+
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*& CONTAR_LADOS  (quantas linhas vieram de cada lado, no modo separado)
+*&
+*& No modo separado a compra e a venda nao se falam: uma pode vir vazia
+*& e a outra cheia, e o arquivo sai com uma aba so com cabecalho. Sem
+*& esta contagem o usuario nao tem como distinguir "filtro do bloco
+*& Contratos nao achou nada" de "o programa deixou de gerar".
+*&---------------------------------------------------------------------*
+FORM contar_lados.
+
+  DATA lv_nv TYPE i.
+
+  IF <gt_sdp> IS ASSIGNED.
+    lv_nv = lines( <gt_sdp> ).
+  ENDIF.
+
+  gv_log = |Contratos de compra: { lines( gt_ctr ) } linha(s). | &&
+           |Vendas ZSD034: { lv_nv } linha(s).|.
+  PERFORM log USING gv_log.
+
+  IF gt_ctr IS INITIAL AND lv_nv > 0.
+    gv_log = 'O bloco Contratos nao achou contrato nenhum. Se o filtro usado foi a Data do '
+          && 'pagamento, lembre que ela fica vazia em contrato ainda nao pago - nesse caso '
+          && 'filtre pela Data do contrato ou pelo Ano-safra.'.
+    PERFORM log USING gv_log.
+  ENDIF.
 
 ENDFORM.
 
@@ -1733,31 +1766,38 @@ FORM montar_abas CHANGING ct_aba TYPE tt_aba.
 
   CLEAR ct_aba.
 
-* aba 1 - contratos de compra
-  IF gt_ctr IS NOT INITIAL.
-    TRY.
-        cl_salv_table=>factory(
-          IMPORTING r_salv_table = lo_alv
-          CHANGING  t_table      = gt_ctr ).
-
-        DATA(lo_cols_c) = lo_alv->get_columns( ).
-        PERFORM titular_colunas USING lo_cols_c.
-        PERFORM ocultar_cruzamento USING lo_cols_c.
-
-        CLEAR ls_aba.
-        ls_aba-nome = gc_aba-compras.
-        GET REFERENCE OF gt_ctr INTO ls_aba-dref.
-        PERFORM montar_colx USING gt_ctr lo_cols_c CHANGING ls_aba-cols.
-        APPEND ls_aba TO ct_aba.
-
-      CATCH cx_salv_msg INTO DATA(lx1).
-        gv_log = |Falha ao preparar a aba de compras: { lx1->get_text( ) }|.
-        PERFORM log USING gv_log.
-    ENDTRY.
+* aba 1 - contratos de compra.
+* A aba e gerada SEMPRE, mesmo sem linha nenhuma - so com o cabecalho.
+* Omitir a aba vazia era pior: o usuario recebia um arquivo so com a
+* ZSD034 e nao tinha como saber se o lado da compra veio zerado ou se o
+* programa tinha deixado de gerar.
+  IF gt_ctr IS INITIAL.
+    PERFORM log USING
+      'Contratos de compra: 0 linha(s) para os filtros do bloco Contratos - aba/arquivo so com cabecalho.'.
   ENDIF.
+  TRY.
+      cl_salv_table=>factory(
+        IMPORTING r_salv_table = lo_alv
+        CHANGING  t_table      = gt_ctr ).
 
-* aba 2 - vendas (ZSD034)
-  IF <gt_sdp> IS ASSIGNED AND <gt_sdp> IS NOT INITIAL.
+      DATA(lo_cols_c) = lo_alv->get_columns( ).
+      PERFORM titular_colunas USING lo_cols_c.
+      PERFORM ocultar_cruzamento USING lo_cols_c.
+
+      CLEAR ls_aba.
+      ls_aba-nome = gc_aba-compras.
+      GET REFERENCE OF gt_ctr INTO ls_aba-dref.
+      PERFORM montar_colx USING gt_ctr lo_cols_c CHANGING ls_aba-cols.
+      APPEND ls_aba TO ct_aba.
+
+    CATCH cx_salv_msg INTO DATA(lx1).
+      gv_log = |Falha ao preparar a aba de compras: { lx1->get_text( ) }|.
+      PERFORM log USING gv_log.
+  ENDTRY.
+
+* aba 2 - vendas (ZSD034). Sem a captura nao existe nem a estrutura das
+* colunas, entao aqui a aba realmente nao tem como ser montada.
+  IF <gt_sdp> IS ASSIGNED.
     TRY.
         cl_salv_table=>factory(
           IMPORTING r_salv_table = lo_alv
@@ -1777,7 +1817,8 @@ FORM montar_abas CHANGING ct_aba TYPE tt_aba.
         PERFORM log USING gv_log.
     ENDTRY.
   ELSE.
-    PERFORM log USING 'Sem dados da ZSD034 para os filtros de venda - aba de vendas nao gerada.'.
+    PERFORM log USING
+      'A ZSD034 nao devolveu estrutura nenhuma - aba/arquivo de vendas nao gerado. Confira o bloco Vendas.'.
   ENDIF.
 
 ENDFORM.

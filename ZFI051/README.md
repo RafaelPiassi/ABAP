@@ -114,6 +114,23 @@ Em background o destino é sempre o servidor: gravar no PC exige SAPGUI.
   arquivo **e** exibe os ALVs, e informa num popup o que gravou (ou por que não
   gravou).
 
+### Aba vazia continua sendo aba
+
+Os dois lados são independentes: um pode vir vazio e o outro cheio. Quando isso
+acontece, a aba (ou o arquivo) do lado vazio é gerada **assim mesmo, só com o
+cabeçalho** — e a mensagem informa a contagem dos dois lados. Omitir a aba vazia
+era pior: você recebia um arquivo só com a ZSD034 e não tinha como saber se a
+compra veio zerada ou se o programa deixou de gerar.
+
+A única exceção é quando a captura da ZSD034 falha por completo: aí não existe
+nem a estrutura das colunas, então essa aba realmente não tem como ser montada —
+e a mensagem diz isso.
+
+> Se o lado da compra vier zerado, olhe o filtro que você usou no bloco
+> **Contratos**. A *Data do pagamento* fica vazia em contrato ainda não pago, e
+> filtrar por ela exclui tudo que está em aberto. Para ver contratos em
+> andamento, filtre pela *Data do contrato* ou pelo *Ano-safra*.
+
 ### Onde aparecem as mensagens
 
 Em background as mensagens vão para a **lista do job**, que fica no **spool** —
