@@ -245,9 +245,12 @@ FIELD-SYMBOLS: <gt_sd>  TYPE STANDARD TABLE,
 SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE text-b01.
   PARAMETERS:     p_bukrs TYPE bukrs OBLIGATORY DEFAULT 'BSSE' MEMORY ID buk.
   SELECT-OPTIONS: s_contr FOR zfi_wsys_cab-nr_contrato,
-                  s_dtctr FOR zfi_wsys_cab-dt_contrato,
-                  s_dtpag FOR zfi_wsys_cab-datapagamento,
-                  s_safra FOR zfi_wsys_cab-anosafra,
+                  s_dtctr FOR zfi_wsys_cab-dt_contrato.
+* Obrigatoria e sempre igual a data de criacao da OV (bloco Vendas):
+* os dois lados olham a MESMA janela. Fica em exibicao porque e
+* espelhada da S_AUDAT - ver SINCRONIZAR_DATAS.
+  SELECT-OPTIONS: s_dtpag FOR zfi_wsys_cab-datapagamento MODIF ID pag OBLIGATORY.
+  SELECT-OPTIONS: s_safra FOR zfi_wsys_cab-anosafra,
                   s_forn  FOR zfi_wsys_cab-codfornecedor,
                   s_cctr  FOR zfi_wsys_cab-centro,
                   s_cnpj  FOR lfa1-stcd1,
@@ -274,14 +277,14 @@ SELECTION-SCREEN END OF BLOCK b2.
 
 * Bloco 3 - modo de extracao (uma saida cruzada x dois ALVs separados)
 SELECTION-SCREEN BEGIN OF BLOCK bmod WITH FRAME TITLE text-b05.
-  PARAMETERS: p_mcruz RADIOBUTTON GROUP gmod DEFAULT 'X'   " cruza compra x venda
-                                             USER-COMMAND uc_mod,
-              p_msep  RADIOBUTTON GROUP gmod.              " dois ALVs, sem cruzar
+  PARAMETERS: p_mcruz RADIOBUTTON GROUP gmod             " cruza compra x venda
+                                            USER-COMMAND uc_mod,
+              p_msep  RADIOBUTTON GROUP gmod DEFAULT 'X'.  " dois ALVs, sem cruzar (padrao)
   SELECTION-SCREEN SKIP.
 * so valem no modo separado: no cruzado a saida e uma so
-  PARAMETERS: p_x1arq RADIOBUTTON GROUP gxls DEFAULT 'X'   " 1 arquivo, 2 abas
-                                             MODIF ID xls,
-              p_x2arq RADIOBUTTON GROUP gxls MODIF ID xls. " 2 arquivos
+  PARAMETERS: p_x1arq RADIOBUTTON GROUP gxls MODIF ID xls, " 1 arquivo, 2 abas
+              p_x2arq RADIOBUTTON GROUP gxls DEFAULT 'X'    " 2 arquivos (padrao)
+                                             MODIF ID xls.
 SELECTION-SCREEN END OF BLOCK bmod.
 
 * Bloco 4 - regra do cruzamento (inativo no modo separado)
@@ -300,11 +303,11 @@ SELECTION-SCREEN BEGIN OF BLOCK b4 WITH FRAME TITLE text-b04.
 * Destino do arquivo. O F4 do diretorio navega no PC, entao e facil
 * apontar sem querer uma pasta da estacao de trabalho num destino de
 * servidor - por isso o destino e explicito, e nao adivinhado.
-  PARAMETERS: p_dsrv  RADIOBUTTON GROUP gdst DEFAULT 'X',  " servidor de aplicacao (AL11)
-              p_dpc   RADIOBUTTON GROUP gdst.              " estacao de trabalho (so em dialogo)
+  PARAMETERS: p_dsrv  RADIOBUTTON GROUP gdst,              " servidor de aplicacao (AL11)
+              p_dpc   RADIOBUTTON GROUP gdst DEFAULT 'X'.  " estacao de trabalho (padrao, so em dialogo)
 * Gera o arquivo TAMBEM na execucao em primeiro plano, alem de exibir a
 * ALV. Sem isto o arquivo so sai pelo Job / background.
-  PARAMETERS: p_gerar AS CHECKBOX.
+  PARAMETERS: p_gerar AS CHECKBOX DEFAULT 'X'.
   SELECTION-SCREEN SKIP.
   PARAMETERS: p_xdir  TYPE string LOWER CASE,             " diretorio de destino
               p_xname TYPE string LOWER CASE,             " nome do arquivo (&DATA& / &HORA&)
@@ -340,6 +343,21 @@ INITIALIZATION.
   pb_st  = 'Situacao do agendamento'.
   tx_rep = 'Repetir a cada'.
 
+* A janela padrao e o mes corrente, nos DOIS lados. Sem um default a
+* S_DTPAG (obrigatoria) barraria o primeiro Enter da tela, antes mesmo
+* de o espelhamento com a S_AUDAT poder rodar.
+  IF s_audat[] IS INITIAL.
+    DATA: lv_d1 TYPE d,
+          lv_d2 TYPE d.
+    lv_d1 = sy-datum.
+    lv_d1+6(2) = '01'.
+    lv_d2 = lv_d1 + 31.
+    lv_d2+6(2) = '01'.
+    lv_d2 = lv_d2 - 1.
+    APPEND VALUE #( sign = 'I' option = 'BT' low = lv_d1 high = lv_d2 ) TO s_audat.
+  ENDIF.
+  PERFORM sincronizar_datas.
+
   IF p_jdata IS INITIAL.
     p_jdata = sy-datum.
   ENDIF.
@@ -358,8 +376,18 @@ AT SELECTION-SCREEN OUTPUT.
 * A regra do cruzamento so faz sentido quando ha cruzamento; a escolha
 * entre um arquivo de duas abas e dois arquivos, so quando ha duas
 * saidas. Cada um fica cinza no modo em que nao se aplica.
+  PERFORM sincronizar_datas.
+
   LOOP AT SCREEN.
     CASE screen-group1.
+      WHEN 'PAG'.
+*       espelhada da data de criacao da OV: editavel so confundiria, ja
+*       que qualquer valor digitado seria sobrescrito no proximo PBO.
+*       O REQUIRED sai junto: campo obrigatorio sem entrada e o tipo de
+*       combinacao que trava a tela em algumas releases.
+        screen-input    = '0'.
+        screen-required = '0'.
+        MODIFY SCREEN.
       WHEN 'CRZ'.
         IF p_msep = abap_true.
           screen-input = '0'.
@@ -406,6 +434,10 @@ START-OF-SELECTION.
   IF sy-batch = abap_true.
     p_bg = abap_true.
   ENDIF.
+
+* a data de pagamento acompanha a data de criacao da OV tambem aqui,
+* porque no Job a tela de selecao nao chega a ser montada
+  PERFORM sincronizar_datas.
 
 * Gravar no PC exige GUI: em background so existe o servidor.
   IF p_bg = abap_true AND p_dpc = abap_true.
@@ -473,6 +505,31 @@ START-OF-SELECTION.
       PERFORM exibir_alv.
     ENDIF.
   ENDIF.
+
+*&---------------------------------------------------------------------*
+*& SINCRONIZAR_DATAS
+*&
+*& A data de pagamento do contrato acompanha a data de criacao da OV:
+*& os dois lados do relatorio olham a MESMA janela. A S_AUDAT manda, a
+*& S_DTPAG segue - por isso a S_DTPAG fica em exibicao na tela.
+*&
+*& Roda no PBO (para a tela ja aparecer sincronizada) e tambem no
+*& START-OF-SELECTION, que e o caminho do Job: la a tela nao e montada,
+*& e uma variante antiga poderia trazer as duas datas divergentes.
+*&---------------------------------------------------------------------*
+FORM sincronizar_datas.
+
+  CHECK s_audat[] IS NOT INITIAL.
+
+  CLEAR s_dtpag[].
+  LOOP AT s_audat INTO DATA(ls_au).
+    APPEND VALUE #( sign   = ls_au-sign
+                    option = ls_au-option
+                    low    = ls_au-low
+                    high   = ls_au-high ) TO s_dtpag.
+  ENDLOOP.
+
+ENDFORM.
 
 *&---------------------------------------------------------------------*
 *& LOG / MOSTRAR_LOG
@@ -2555,19 +2612,20 @@ FORM agendar_job.
     lv_mes = p_pint. lv_unid = 'mes(es)'.
   ENDIF.
 
-* 1a execucao: data / hora da tela. Se ja passou, joga para daqui a um
-* minuto (o JOB_CLOSE recusa data de inicio no passado).
+* 1a execucao: data / hora da tela. Se ja passou, o job arranca AGORA
+* (STRTIMMED) em vez de ser empurrado para o proximo horario - esperar
+* nao faz sentido quando o usuario pediu um instante que ja foi.
+* A periodicidade continua valendo: a partir desta execucao imediata.
+  DATA lv_imed TYPE c LENGTH 1.
+
   lv_dt = p_jdata.
   lv_tm = p_jhora.
   IF lv_dt IS INITIAL.
     lv_dt = sy-datum.
   ENDIF.
   IF lv_dt < sy-datum OR ( lv_dt = sy-datum AND lv_tm <= sy-uzeit ).
-    lv_dt = sy-datum.
-    lv_tm = sy-uzeit + 60.
-    IF lv_tm < sy-uzeit.               " virou a meia-noite
-      lv_dt = sy-datum + 1.
-    ENDIF.
+    lv_imed = abap_true.
+    CLEAR: lv_dt, lv_tm.               " com STRTIMMED a data de inicio nao vale
   ENDIF.
 
   CALL FUNCTION 'JOB_OPEN'
@@ -2633,6 +2691,7 @@ FORM agendar_job.
       jobname              = p_jname
       sdlstrtdt            = lv_dt
       sdlstrttm            = lv_tm
+      strtimmed            = lv_imed
       prdmins              = lv_min
       prdhours             = lv_hor
       prddays              = lv_dia
@@ -2647,6 +2706,39 @@ FORM agendar_job.
       job_notex            = 6
       lock_failed          = 7
       OTHERS               = 8.
+
+* Sem processo de background livre agora, o inicio imediato e recusado
+* (CANT_START_IMMEDIATE). Nesse caso vale mais agendar para daqui a um
+* minuto do que devolver erro e perder o agendamento.
+  IF sy-subrc = 1 AND lv_imed = abap_true.
+    CLEAR lv_imed.
+    lv_dt = sy-datum.
+    lv_tm = sy-uzeit + 60.
+    IF lv_tm < sy-uzeit.               " virou a meia-noite
+      lv_dt = sy-datum + 1.
+    ENDIF.
+    CALL FUNCTION 'JOB_CLOSE'
+      EXPORTING
+        jobcount             = lv_jobcount
+        jobname              = p_jname
+        sdlstrtdt            = lv_dt
+        sdlstrttm            = lv_tm
+        prdmins              = lv_min
+        prdhours             = lv_hor
+        prddays              = lv_dia
+        prdweeks             = lv_sem
+        prdmonths            = lv_mes
+      EXCEPTIONS
+        cant_start_immediate = 1
+        invalid_startdate    = 2
+        jobname_missing      = 3
+        job_close_failed     = 4
+        job_nosteps          = 5
+        job_notex            = 6
+        lock_failed          = 7
+        OTHERS               = 8.
+  ENDIF.
+
   IF sy-subrc <> 0.
     MESSAGE 'Falha ao agendar o job (JOB_CLOSE).' TYPE 'E'.
     RETURN.
@@ -2657,13 +2749,17 @@ FORM agendar_job.
     WHEN p_x2arq = abap_true THEN 'dois arquivos (_COMPRAS e _VENDAS)'
     ELSE 'um arquivo com duas abas (compras e vendas)' ).
 
-  IF p_pint > 0.
-    MESSAGE |Job '{ p_jname }' agendado para { lv_dt DATE = USER } { lv_tm TIME = USER }, | &&
-            |repetindo a cada { p_pint } { lv_unid }. Gera { lv_saida } em { p_xdir }.| TYPE 'S'.
-  ELSE.
-    MESSAGE |Job '{ p_jname }' agendado para { lv_dt DATE = USER } { lv_tm TIME = USER } | &&
-            |(execucao unica). Gera { lv_saida } em { p_xdir }.| TYPE 'S'.
-  ENDIF.
+* com inicio imediato nao ha data/hora agendada para mostrar
+  DATA(lv_quando) = COND string(
+    WHEN lv_imed = abap_true THEN 'iniciado agora'
+    ELSE |agendado para { lv_dt DATE = USER } { lv_tm TIME = USER }| ).
+
+  DATA(lv_ritmo) = COND string(
+    WHEN p_pint > 0 THEN |, repetindo a cada { p_pint } { lv_unid }|
+    ELSE ' (execucao unica)' ).
+
+  MESSAGE |Job '{ p_jname }' { lv_quando }{ lv_ritmo }. | &&
+          |Gera { lv_saida } em { p_xdir }.| TYPE 'S'.
 
 ENDFORM.
 

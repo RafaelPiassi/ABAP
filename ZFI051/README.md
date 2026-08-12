@@ -19,7 +19,7 @@ de vendas é montado em tempo de execução.
 
 O bloco **Modo de extração** decide a forma da saída.
 
-### Cruzado (padrão — `P_MCRUZ`)
+### Cruzado (`P_MCRUZ`)
 
 Uma saída só. Bloco do contrato e bloco da ZSD034 na **mesma linha**, ligados
 pelo CPF / CNPJ:
@@ -36,7 +36,7 @@ máscara e zeros à esquerda não atrapalham.
 gera 30 linhas. A coluna **Cruzamento** marca cada linha como `Compra+Venda`,
 `So compra` ou `So venda`.
 
-### Separado (`P_MSEP`) — sem cruzar compra com venda
+### Separado (padrão — `P_MSEP`) — sem cruzar compra com venda
 
 **Dois ALVs distintos**, empilhados num splitter sobre docking:
 
@@ -67,8 +67,8 @@ No modo separado, o bloco **Modo de extração** também escolhe a forma do arqu
 
 | opção | resultado |
 |---|---|
-| `P_X1ARQ` (padrão) | **um** `.xlsx` com **duas abas**: `Compras (Contratos)` e `Vendas (ZSD034)` |
-| `P_X2ARQ` | **dois** `.xlsx`: o nome informado ganha os sufixos `_COMPRAS` e `_VENDAS` antes da extensão |
+| `P_X1ARQ` | **um** `.xlsx` com **duas abas**: `Compras (Contratos)` e `Vendas (ZSD034)` |
+| `P_X2ARQ` (padrão) | **dois** `.xlsx`: o nome informado ganha os sufixos `_COMPRAS` e `_VENDAS` antes da extensão |
 
 No modo cruzado nada muda: continua um arquivo único, gerado pelo
 `CL_SALV_BS_LEX`.
@@ -93,8 +93,8 @@ que aparecem na tela — inclusive para colunas novas que a ZSD034 vier a ganhar
 
 ### Destino: servidor ou PC
 
-`P_DSRV` (padrão) grava no **servidor de aplicação**, por `OPEN DATASET`.
-`P_DPC` grava na **estação de trabalho**, por `GUI_DOWNLOAD`.
+`P_DSRV` grava no **servidor de aplicação**, por `OPEN DATASET`. `P_DPC` (padrão)
+grava na **estação de trabalho**, por `GUI_DOWNLOAD`.
 
 > **É aqui que quase todo mundo tropeça.** O Job roda no servidor de aplicação,
 > que não enxerga o disco do seu PC. Se você apontar `C:\Users\...\Desktop` com
@@ -110,9 +110,29 @@ Em background o destino é sempre o servidor: gravar no PC exige SAPGUI.
 
 - **Sempre** em background — vale tanto o Job agendado pelo botão quanto uma
   execução solta por F9 / SM36, porque o programa detecta `SY-BATCH`.
-- **Em primeiro plano**, só se `P_GERAR` estiver marcado. Aí o programa gera o
+- **Em primeiro plano**, só se `P_GERAR` estiver marcado — e ele vem marcado por
+  padrão. Aí o programa gera o
   arquivo **e** exibe os ALVs, e informa num popup o que gravou (ou por que não
   gravou).
+
+### A data de pagamento acompanha a data da OV
+
+`S_DTPAG` (Data do pagamento, bloco **Contratos**) é **obrigatória** e carrega
+sempre o mesmo valor e o mesmo range de `S_AUDAT` (Data de criação da OV, bloco
+**Vendas**) — os dois lados do relatório olham a mesma janela. Por isso ela
+aparece em **exibição**: qualquer valor digitado ali seria sobrescrito no próximo
+PBO, o que só confundiria.
+
+O padrão de ambas, quando a tela abre sem variante, é o **mês corrente**. Sem um
+default, a `S_DTPAG` obrigatória barraria o primeiro Enter antes de o
+espelhamento poder rodar.
+
+O espelhamento roda no PBO da tela **e** no `START-OF-SELECTION` — este segundo
+é o caminho do Job, onde a tela não chega a ser montada e uma variante antiga
+poderia trazer as duas datas divergentes.
+
+> Se um dia as duas precisarem ser independentes, é remover o `MODIF ID pag` do
+> `LOOP AT SCREEN` e a chamada de `SINCRONIZAR_DATAS`.
 
 ### Aba vazia continua sendo aba
 
@@ -126,10 +146,12 @@ A única exceção é quando a captura da ZSD034 falha por completo: aí não ex
 nem a estrutura das colunas, então essa aba realmente não tem como ser montada —
 e a mensagem diz isso.
 
-> Se o lado da compra vier zerado, olhe o filtro que você usou no bloco
-> **Contratos**. A *Data do pagamento* fica vazia em contrato ainda não pago, e
-> filtrar por ela exclui tudo que está em aberto. Para ver contratos em
-> andamento, filtre pela *Data do contrato* ou pelo *Ano-safra*.
+> Se o lado da compra vier zerado, o filtro a conferir é o do bloco
+> **Contratos**. Como a *Data do pagamento* acompanha a data da OV, zero
+> contratos significa que nenhum contrato tem data de pagamento dentro dessa
+> janela — o que é esperado para contrato ainda não pago, já que o campo fica
+> vazio. Restrinja mais pelos outros filtros (fornecedor, centro, safra) ou
+> confira o conteúdo da `ZFI_WSYS_CAB` na SE16N.
 
 ### Onde aparecem as mensagens
 
@@ -155,6 +177,13 @@ dias, semanas ou meses; `N = 0` agenda uma execução única.
 O modo de extração e a forma do arquivo viajam na seleção: o Job gera exatamente
 o que a tela está pedindo.
 
+Se a data e a hora da primeira execução já tiverem passado, o job **arranca na
+hora** (`STRTIMMED`) em vez de ser empurrado para o próximo horário — esperar não
+faz sentido quando o instante pedido já foi. A periodicidade continua valendo, a
+partir dessa execução imediata. Se não houver processo de background livre no
+momento (`CANT_START_IMMEDIATE`), o programa agenda para daqui a um minuto em vez
+de devolver erro e perder o agendamento.
+
 No nome do arquivo valem os curingas `&DATA&` (AAAAMMDD) e `&HORA&` (HHMMSS).
 Sem curinga, cada execução **sobrescreve** o mesmo arquivo.
 
@@ -168,9 +197,9 @@ Sem curinga, cada execução **sobrescreve** o mesmo arquivo.
 
 | Bloco | Campos |
 |---|---|
-| **Contratos** | `P_BUKRS` (obrigatório), contrato, data do contrato, data de pagamento, safra, fornecedor, centro, CNPJ, CPF, IE, status |
+| **Contratos** | `P_BUKRS` (obrigatório), contrato, data do contrato, **data de pagamento (obrigatória, espelhada da data da OV)**, safra, fornecedor, centro, CNPJ, CPF, IE, status |
 | **Vendas** | data de criação da OV (obrigatório), documento, org. vendas, canal, setor, escritório, equipe, tipo de OV, ano-safra, centro, material, grupo de mercadorias |
-| **Modo de extração** | cruzado × separado; um arquivo de duas abas × dois arquivos |
+| **Modo de extração** | cruzado × separado (padrão: separado); um arquivo de duas abas × dois arquivos (padrão: dois arquivos) |
 | **Regra do cruzamento** | casa por Emissor da ordem (AG) / Recebedor (WE) / qualquer um; trazer contrato sem venda; trazer venda sem contrato |
 | **Arquivo / Job** | destino (servidor × PC), gerar nesta execução, diretório, nome do arquivo, nome do job, data/hora inicial, periodicidade |
 
