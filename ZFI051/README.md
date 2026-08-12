@@ -91,12 +91,35 @@ DOI exigiria GUI, daí a montagem na unha. O que sai do gerador:
 Os títulos das colunas são lidos de uma ALV headless, então são **os mesmos**
 que aparecem na tela — inclusive para colunas novas que a ZSD034 vier a ganhar.
 
+### Destino: servidor ou PC
+
+`P_DSRV` (padrão) grava no **servidor de aplicação**, por `OPEN DATASET`.
+`P_DPC` grava na **estação de trabalho**, por `GUI_DOWNLOAD`.
+
+> **É aqui que quase todo mundo tropeça.** O Job roda no servidor de aplicação,
+> que não enxerga o disco do seu PC. Se você apontar `C:\Users\...\Desktop` com
+> destino "servidor", o job termina com status **Concl.** e **não gera arquivo
+> nenhum** — a falha fica no *spool* do job, não no log. Para o Job, use um
+> caminho dos que a **AL11** lista. O agendamento agora barra caminho de PC na
+> hora de agendar, e o F4 do diretório só navega no PC quando o destino é
+> "estação de trabalho".
+
+Em background o destino é sempre o servidor: gravar no PC exige SAPGUI.
+
 ### Quando o arquivo é gerado
 
-Em background. Vale tanto o Job agendado pelo botão quanto uma execução solta
-por F9 / SM36 — o programa detecta `SY-BATCH` e troca a ALV pelo arquivo
-sozinho. Em primeiro plano o programa **exibe** os ALVs; para o arquivo, use o
-Job (ou o export de cada grid, que dá um arquivo por ALV).
+- **Sempre** em background — vale tanto o Job agendado pelo botão quanto uma
+  execução solta por F9 / SM36, porque o programa detecta `SY-BATCH`.
+- **Em primeiro plano**, só se `P_GERAR` estiver marcado. Aí o programa gera o
+  arquivo **e** exibe os ALVs, e informa num popup o que gravou (ou por que não
+  gravou).
+
+### Onde aparecem as mensagens
+
+Em background as mensagens vão para a **lista do job**, que fica no **spool** —
+não no log do job. Em primeiro plano elas saem juntas num popup. Se o job
+terminar sem arquivo, o motivo está no spool: SM37 → selecione o job → botão
+**Spool**.
 
 ---
 
@@ -132,7 +155,7 @@ Sem curinga, cada execução **sobrescreve** o mesmo arquivo.
 | **Vendas** | data de criação da OV (obrigatório), documento, org. vendas, canal, setor, escritório, equipe, tipo de OV, ano-safra, centro, material, grupo de mercadorias |
 | **Modo de extração** | cruzado × separado; um arquivo de duas abas × dois arquivos |
 | **Regra do cruzamento** | casa por Emissor da ordem (AG) / Recebedor (WE) / qualquer um; trazer contrato sem venda; trazer venda sem contrato |
-| **Job** | diretório, nome do arquivo, nome do job, data/hora inicial, periodicidade |
+| **Arquivo / Job** | destino (servidor × PC), gerar nesta execução, diretório, nome do arquivo, nome do job, data/hora inicial, periodicidade |
 
 ---
 
@@ -160,8 +183,20 @@ Classes: `CL_SALV_TABLE`, `CL_SALV_BS_RUNTIME_INFO`, `CL_SALV_BS_LEX`,
    | `B01` | Contratos |
    | `B02` | Vendas (ZSD034) |
    | `B03` | Regra do cruzamento |
-   | `B04` | Job de extração automática |
+   | `B04` | Arquivo e Job de extração automática |
    | `B05` | Modo de extração |
+
+   E os textos de seleção dos parâmetros novos:
+
+   | Nome | Texto |
+   |---|---|
+   | `P_MCRUZ` | Cruzar compra x venda |
+   | `P_MSEP` | Dois ALVs, sem cruzar |
+   | `P_X1ARQ` | Arquivo único, duas abas |
+   | `P_X2ARQ` | Dois arquivos separados |
+   | `P_DSRV` | Destino: servidor (AL11) |
+   | `P_DPC` | Destino: estação de trabalho |
+   | `P_GERAR` | Gerar arquivo nesta execução |
 
 3. **SE93** — criar a transação `ZFI051` apontando para o programa `ZFIR051`.
 

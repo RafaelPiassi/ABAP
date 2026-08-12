@@ -225,6 +225,9 @@ DATA: gt_ctr    TYPE tt_ctr,
       gt_map_sd TYPE tt_map,          " ZSD034 -> copia plana (modo separado)
       gt_lbl    TYPE tt_lbl,
       gv_sd_ok  TYPE abap_bool,       " a ZSD034 devolveu dados?
+      gt_log    TYPE stringtab,       " mensagens da execucao (ver FORM LOG)
+      gv_log    TYPE string,          " texto montado antes do PERFORM LOG
+                                      " (PERFORM nao aceita expressao como parametro)
       gr_salv   TYPE REF TO cl_salv_table,
       gr_salv_c TYPE REF TO cl_salv_table,   " ALV de compras (modo separado)
       gr_salv_v TYPE REF TO cl_salv_table,   " ALV de vendas  (modo separado)
@@ -292,9 +295,18 @@ SELECTION-SCREEN BEGIN OF BLOCK b3 WITH FRAME TITLE text-b03.
               p_semctr AS CHECKBOX MODIF ID crz.              " venda sem contrato
 SELECTION-SCREEN END OF BLOCK b3.
 
-* Bloco 5 - Job de extracao automatica (periodicidade a criterio do usuario)
+* Bloco 5 - Arquivo e Job de extracao automatica
 SELECTION-SCREEN BEGIN OF BLOCK b4 WITH FRAME TITLE text-b04.
-  PARAMETERS: p_xdir  TYPE string LOWER CASE,             " diretorio no servidor
+* Destino do arquivo. O F4 do diretorio navega no PC, entao e facil
+* apontar sem querer uma pasta da estacao de trabalho num destino de
+* servidor - por isso o destino e explicito, e nao adivinhado.
+  PARAMETERS: p_dsrv  RADIOBUTTON GROUP gdst DEFAULT 'X',  " servidor de aplicacao (AL11)
+              p_dpc   RADIOBUTTON GROUP gdst.              " estacao de trabalho (so em dialogo)
+* Gera o arquivo TAMBEM na execucao em primeiro plano, alem de exibir a
+* ALV. Sem isto o arquivo so sai pelo Job / background.
+  PARAMETERS: p_gerar AS CHECKBOX.
+  SELECTION-SCREEN SKIP.
+  PARAMETERS: p_xdir  TYPE string LOWER CASE,             " diretorio de destino
               p_xname TYPE string LOWER CASE,             " nome do arquivo (&DATA& / &HORA&)
               p_jname TYPE tbtcjob-jobname DEFAULT 'ZFI051_EXTRACAO',
               p_jdata TYPE sy-datum,                      " 1a execucao - data
@@ -395,8 +407,15 @@ START-OF-SELECTION.
     p_bg = abap_true.
   ENDIF.
 
-* No Job o nome do arquivo e resolvido a cada execucao (curingas).
-  IF p_bg = abap_true.
+* Gravar no PC exige GUI: em background so existe o servidor.
+  IF p_bg = abap_true AND p_dpc = abap_true.
+    PERFORM log USING 'Destino "estacao de trabalho" nao existe em background - gravando no servidor.'.
+    p_dsrv = abap_true.
+    p_dpc  = abap_false.
+  ENDIF.
+
+* O nome do arquivo e resolvido a cada execucao (curingas &DATA& / &HORA&).
+  IF p_bg = abap_true OR p_gerar = abap_true.
     PERFORM montar_arquivo CHANGING p_xfile.
   ENDIF.
 
@@ -413,27 +432,79 @@ START-OF-SELECTION.
   PERFORM saida_vazia CHANGING gv_vazio.
 
   IF gv_vazio = abap_true.
-    IF p_bg = abap_true.
-      WRITE: / 'Nenhuma linha para os filtros informados. Arquivo nao gerado.'.
-    ELSE.
-      MESSAGE 'Nenhuma linha para os filtros informados.' TYPE 'S' DISPLAY LIKE 'E'.
+*   sem linha nenhuma o programa nao tem o que exibir nem o que gravar.
+*   A mensagem diz quantas linhas vieram de CADA lado: sem isso, "nao
+*   aconteceu nada" nao distingue filtro sem resultado de erro na
+*   captura da ZSD034.
+    DATA: gv_nsd  TYPE i,
+          gv_diag TYPE string.
+    IF <gt_sd> IS ASSIGNED.
+      gv_nsd = lines( <gt_sd> ).       " a saida crua da ZSD034
     ENDIF.
+    gv_diag = |Nenhuma linha para os filtros informados. | &&
+              |Contratos de compra: { lines( gt_ctr ) }. Linhas da ZSD034: { gv_nsd }.|.
+    IF gv_sd_ok = abap_false.
+      gv_diag = gv_diag && ' A ZSD034 nao devolveu dados para os filtros do bloco Vendas.'.
+    ENDIF.
+    PERFORM log USING gv_diag.
+    PERFORM mostrar_log.
     RETURN.
   ENDIF.
 
-  IF p_bg = abap_true.
+* Arquivo: sempre em background; em primeiro plano, so se P_GERAR pedir
+  IF p_bg = abap_true OR p_gerar = abap_true.
     IF p_msep = abap_true.
       PERFORM exportar_separado.
     ELSE.
       PERFORM exportar_xlsx.
     ENDIF.
-  ELSE.
+  ENDIF.
+
+* ALV: so em primeiro plano
+  IF p_bg = abap_false.
+    PERFORM mostrar_log.
     IF p_msep = abap_true.
       PERFORM exibir_alv_separado.
     ELSE.
       PERFORM exibir_alv.
     ENDIF.
   ENDIF.
+
+*&---------------------------------------------------------------------*
+*& LOG / MOSTRAR_LOG
+*&
+*& Em background o WRITE vai para a lista do job - que so aparece no
+*& SPOOL, nao no log do job. Em primeiro plano o WRITE quebraria a ALV,
+*& e uma MESSAGE TYPE 'S' se perde no rodape. Entao as mensagens sao
+*& acumuladas e, em dialogo, saem juntas num popup - que ninguem deixa
+*& de ver.
+*&---------------------------------------------------------------------*
+FORM log USING iv_txt TYPE clike.
+  APPEND iv_txt TO gt_log.
+  IF p_bg = abap_true.
+    WRITE: / iv_txt.
+  ENDIF.
+ENDFORM.
+
+FORM mostrar_log.
+
+  DATA lv_txt TYPE string.
+
+  CHECK p_bg = abap_false.
+  CHECK gt_log IS NOT INITIAL.
+
+  LOOP AT gt_log INTO DATA(ls_l).
+    IF lv_txt IS INITIAL.
+      lv_txt = ls_l.
+    ELSE.
+      lv_txt = |{ lv_txt } { ls_l }|.
+    ENDIF.
+  ENDLOOP.
+  CLEAR gt_log.
+
+  MESSAGE lv_txt TYPE 'I'.
+
+ENDFORM.
 
 *&---------------------------------------------------------------------*
 *& SAIDA_VAZIA  (nao ha o que exibir / gravar?)
@@ -692,7 +763,7 @@ FORM ler_zsd034.
     lv_msg = |Nao foi possivel capturar a saida da ZSD034 ({ gc_prog }). | &&
              |Sai so o bloco de contratos.|.
     IF p_bg = abap_true.
-      WRITE: / lv_msg.
+      PERFORM log USING lv_msg.
     ELSE.
       MESSAGE lv_msg TYPE 'S' DISPLAY LIKE 'W'.
     ENDIF.
@@ -948,7 +1019,8 @@ FORM montar_saida_separada.
       lo_table  = cl_abap_tabledescr=>create( p_line_type = lo_struct ).
     CATCH cx_sy_struct_creation cx_sy_table_creation INTO DATA(lx_cr).
       IF p_bg = abap_true.
-        WRITE: / 'Falha ao montar o bloco de vendas:', lx_cr->get_text( ).
+        gv_log = |Falha ao montar o bloco de vendas: { lx_cr->get_text( ) }|.
+        PERFORM log USING gv_log.
       ELSE.
         MESSAGE lx_cr->get_text( ) TYPE 'S' DISPLAY LIKE 'W'.
       ENDIF.
@@ -1200,7 +1272,13 @@ FORM exibir_alv_separado.
       lifetime_dynpro_dynpro_link = 5
       OTHERS                      = 6.
   IF sy-subrc <> 0.
-    MESSAGE 'Nao foi possivel abrir a tela dos dois ALVs.' TYPE 'E'.
+*   sem docking nao da para empilhar os dois grids. Em vez de nao exibir
+*   nada, cai para o modo sequencial: primeiro os contratos em tela
+*   cheia; ao sair dele, as vendas.
+    CLEAR go_dock.
+    PERFORM log USING 'Nao foi possivel abrir a tela dividida - os dois ALVs sao exibidos em sequencia.'.
+    PERFORM mostrar_log.
+    PERFORM exibir_alv_sequencial.
     RETURN.
   ENDIF.
 
@@ -1276,6 +1354,58 @@ FORM exibir_alv_separado.
 
       gr_salv_v->display( ).
 
+    CATCH cx_salv_msg INTO DATA(lx2).
+      MESSAGE lx2->get_text( ) TYPE 'S' DISPLAY LIKE 'E'.
+  ENDTRY.
+
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*& EXIBIR_ALV_SEQUENCIAL
+*&
+*& Plano B do modo separado, quando o docking nao pode ser criado: os
+*& dois ALVs em tela cheia, um depois do outro. Sai do primeiro (F3) e o
+*& segundo aparece.
+*&---------------------------------------------------------------------*
+FORM exibir_alv_sequencial.
+
+  DATA lo_alv TYPE REF TO cl_salv_table.
+
+  IF gt_ctr IS NOT INITIAL.
+    TRY.
+        cl_salv_table=>factory(
+          IMPORTING r_salv_table = lo_alv
+          CHANGING  t_table      = gt_ctr ).
+        lo_alv->get_functions( )->set_all( abap_true ).
+        DATA(lo_cols_c) = lo_alv->get_columns( ).
+        lo_cols_c->set_optimize( abap_true ).
+        PERFORM titular_colunas USING lo_cols_c.
+        PERFORM ocultar_cruzamento USING lo_cols_c.
+        DATA(lo_agg_c) = lo_alv->get_aggregations( ).
+        PERFORM totalizar USING lo_agg_c.
+        lo_alv->get_display_settings( )->set_list_header(
+          |ZFI051 - Contratos de compra { p_bukrs } (1 de 2)| ).
+        lo_alv->display( ).
+      CATCH cx_salv_msg INTO DATA(lx1).
+        MESSAGE lx1->get_text( ) TYPE 'S' DISPLAY LIKE 'E'.
+    ENDTRY.
+  ENDIF.
+
+  CHECK <gt_sdp> IS ASSIGNED.
+
+  TRY.
+      cl_salv_table=>factory(
+        IMPORTING r_salv_table = lo_alv
+        CHANGING  t_table      = <gt_sdp> ).
+      lo_alv->get_functions( )->set_all( abap_true ).
+      DATA(lo_cols_v) = lo_alv->get_columns( ).
+      lo_cols_v->set_optimize( abap_true ).
+      PERFORM titular_vendas USING lo_cols_v.
+      DATA(lo_agg_v) = lo_alv->get_aggregations( ).
+      PERFORM totalizar_vendas USING lo_agg_v.
+      lo_alv->get_display_settings( )->set_list_header(
+        |ZFI051 - Vendas ZSD034 (2 de 2)| ).
+      lo_alv->display( ).
     CATCH cx_salv_msg INTO DATA(lx2).
       MESSAGE lx2->get_text( ) TYPE 'S' DISPLAY LIKE 'E'.
   ENDTRY.
@@ -1466,7 +1596,7 @@ FORM exportar_xlsx.
         lx        TYPE REF TO cx_root.
 
   IF p_xfile IS INITIAL.
-    WRITE: / 'Diretorio / nome do arquivo nao informados - nada gravado.'.
+    PERFORM log USING 'Diretorio ou nome do arquivo nao informados (bloco Arquivo / Job).'.
     RETURN.
   ENDIF.
 
@@ -1493,7 +1623,8 @@ FORM exportar_xlsx.
         IMPORTING
           er_result_file       = lv_xstr ).
     CATCH cx_root INTO lx.
-      WRITE: / 'Falha ao gerar o xlsx:', lx->get_text( ).
+        gv_log = |Falha ao gerar o xlsx: { lx->get_text( ) }|.
+        PERFORM log USING gv_log.
       RETURN.
   ENDTRY.
 
@@ -1523,13 +1654,13 @@ FORM exportar_separado.
         lv_tot  TYPE i.
 
   IF p_xfile IS INITIAL.
-    WRITE: / 'Diretorio / nome do arquivo nao informados - nada gravado.'.
+    PERFORM log USING 'Diretorio ou nome do arquivo nao informados (bloco Arquivo / Job).'.
     RETURN.
   ENDIF.
 
   PERFORM montar_abas CHANGING lt_aba.
   IF lt_aba IS INITIAL.
-    WRITE: / 'Nada a gravar.'.
+    PERFORM log USING 'Nada a gravar.'.
     RETURN.
   ENDIF.
 
@@ -1547,7 +1678,8 @@ FORM exportar_separado.
 
       PERFORM gerar_xlsx USING lt_uma CHANGING lv_xstr.
       IF lv_xstr IS INITIAL.
-        WRITE: / 'Falha ao montar o xlsx de', ls_aba-nome.
+          gv_log = |Falha ao montar o xlsx de { ls_aba-nome }.|.
+          PERFORM log USING gv_log.
         CONTINUE.
       ENDIF.
 
@@ -1558,14 +1690,15 @@ FORM exportar_separado.
 *   um arquivo so, uma aba por bloco
     PERFORM gerar_xlsx USING lt_aba CHANGING lv_xstr.
     IF lv_xstr IS INITIAL.
-      WRITE: / 'Falha ao montar o xlsx de duas abas.'.
+      PERFORM log USING 'Falha ao montar o xlsx de duas abas.'.
       RETURN.
     ENDIF.
 
     LOOP AT lt_aba INTO ls_aba.
       PERFORM linhas_da_aba USING ls_aba CHANGING lv_lin.
       lv_tot = lv_tot + lv_lin.
-      WRITE: / 'Aba', ls_aba-nome, ':', lv_lin, 'linha(s).'.
+      gv_log = |Aba { ls_aba-nome }: { lv_lin } linha(s).|.
+      PERFORM log USING gv_log.
     ENDLOOP.
     PERFORM gravar_arquivo USING p_xfile lv_xstr lv_tot.
   ENDIF.
@@ -1618,7 +1751,8 @@ FORM montar_abas CHANGING ct_aba TYPE tt_aba.
         APPEND ls_aba TO ct_aba.
 
       CATCH cx_salv_msg INTO DATA(lx1).
-        WRITE: / 'Falha ao preparar a aba de compras:', lx1->get_text( ).
+        gv_log = |Falha ao preparar a aba de compras: { lx1->get_text( ) }|.
+        PERFORM log USING gv_log.
     ENDTRY.
   ENDIF.
 
@@ -1639,10 +1773,11 @@ FORM montar_abas CHANGING ct_aba TYPE tt_aba.
         APPEND ls_aba TO ct_aba.
 
       CATCH cx_salv_msg INTO DATA(lx2).
-        WRITE: / 'Falha ao preparar a aba de vendas:', lx2->get_text( ).
+        gv_log = |Falha ao preparar a aba de vendas: { lx2->get_text( ) }|.
+        PERFORM log USING gv_log.
     ENDTRY.
   ELSE.
-    WRITE: / 'Sem dados da ZSD034 para os filtros de venda - aba de vendas nao gerada.'.
+    PERFORM log USING 'Sem dados da ZSD034 para os filtros de venda - aba de vendas nao gerada.'.
   ENDIF.
 
 ENDFORM.
@@ -2137,22 +2272,111 @@ FORM gravar_arquivo USING iv_file TYPE string
                           iv_x    TYPE xstring
                           iv_lin  TYPE i.
 
+  DATA: lv_msg  TYPE string,
+        lv_bytes TYPE i.
+
   IF iv_x IS INITIAL.
-    WRITE: / 'Arquivo vazio - nada gravado:', iv_file.
+    gv_log = |Arquivo vazio - nada gravado: { iv_file }|.
+    PERFORM log USING gv_log.
+    RETURN.
+  ENDIF.
+  lv_bytes = xstrlen( iv_x ).
+
+  IF p_dpc = abap_true.
+    PERFORM gravar_frontend USING iv_file iv_x iv_lin lv_bytes.
     RETURN.
   ENDIF.
 
-  OPEN DATASET iv_file FOR OUTPUT IN BINARY MODE.
+* Servidor de aplicacao. O caminho e resolvido pelo SERVIDOR, nao pelo
+* PC: uma pasta do Windows do usuario (C:\... ou \\servidor\...) nao
+* existe para ele, e e o erro mais comum aqui.
+  OPEN DATASET iv_file FOR OUTPUT IN BINARY MODE MESSAGE lv_msg.
   IF sy-subrc <> 0.
-    WRITE: / 'Nao foi possivel abrir o arquivo para gravacao:', iv_file.
+    gv_log = |Nao foi possivel gravar no servidor de aplicacao: { iv_file }|.
+    PERFORM log USING gv_log.
+    IF lv_msg IS NOT INITIAL.
+      gv_log = |Motivo do sistema operacional: { lv_msg }|.
+      PERFORM log USING gv_log.
+    ENDIF.
+    PERFORM diagnostico_dir USING iv_file.
     RETURN.
   ENDIF.
   TRANSFER iv_x TO iv_file.
   CLOSE DATASET iv_file.
 
-  WRITE: / 'Arquivo gerado :', iv_file.
-  WRITE: / 'Linhas         :', iv_lin.
-  WRITE: / 'Tamanho (bytes):', xstrlen( iv_x ).
+  DATA(lv_ok) = |Arquivo gerado no servidor: { iv_file } | &&
+                |({ iv_lin } linha(s), { lv_bytes } bytes).|.
+  PERFORM log USING lv_ok.
+
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*& GRAVAR_FRONTEND  (destino = estacao de trabalho; exige GUI)
+*&---------------------------------------------------------------------*
+FORM gravar_frontend USING iv_file  TYPE string
+                           iv_x     TYPE xstring
+                           iv_lin   TYPE i
+                           iv_bytes TYPE i.
+
+  DATA: lt_bin TYPE solix_tab,
+        lv_len TYPE i.
+
+  CALL FUNCTION 'SCMS_XSTRING_TO_BINARY'
+    EXPORTING
+      buffer        = iv_x
+    IMPORTING
+      output_length = lv_len
+    TABLES
+      binary_tab    = lt_bin.
+
+  cl_gui_frontend_services=>gui_download(
+    EXPORTING
+      bin_filesize = lv_len
+      filename     = iv_file
+      filetype     = 'BIN'
+    CHANGING
+      data_tab     = lt_bin
+    EXCEPTIONS
+      OTHERS       = 1 ).
+  IF sy-subrc <> 0.
+    gv_log = |Nao foi possivel gravar no PC: { iv_file } (sy-subrc { sy-subrc }).|.
+    PERFORM log USING gv_log.
+    RETURN.
+  ENDIF.
+
+  DATA(lv_ok) = |Arquivo gerado no PC: { iv_file } | &&
+                |({ iv_lin } linha(s), { iv_bytes } bytes).|.
+  PERFORM log USING lv_ok.
+
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*& DIAGNOSTICO_DIR
+*&
+*& Quando a gravacao no servidor falha, o motivo quase sempre e o mesmo:
+*& o diretorio informado e uma pasta do PC. O F4 navega no frontend, o
+*& que convida ao engano. Aqui a mensagem diz isso com todas as letras
+*& em vez de deixar o usuario com um "job terminou sem gerar arquivo".
+*&---------------------------------------------------------------------*
+FORM diagnostico_dir USING iv_file TYPE string.
+
+  DATA: lv_ini TYPE string,
+        lv_txt TYPE string.
+
+  IF strlen( iv_file ) >= 2.
+    lv_ini = iv_file(2).
+  ENDIF.
+
+  IF lv_ini CS ':' OR lv_ini = '\\'.
+    lv_txt = 'O caminho informado e uma pasta da ESTACAO DE TRABALHO. O Job roda no '
+          && 'SERVIDOR DE APLICACAO, que nao enxerga o disco do seu PC. Informe um '
+          && 'diretorio do servidor (dos que a AL11 lista) ou, em primeiro plano, '
+          && 'marque o destino "Estacao de trabalho".'.
+  ELSE.
+    lv_txt = 'Confira na AL11 se o diretorio existe e se o usuario do servidor de '
+          && 'aplicacao tem permissao de gravacao nele.'.
+  ENDIF.
+  PERFORM log USING lv_txt.
 
 ENDFORM.
 
@@ -2201,6 +2425,15 @@ FORM f4_diretorio.
 
   DATA lv_folder TYPE string.
 
+* O browse so navega no PC. Com destino "servidor" ele daria um caminho
+* que o servidor de aplicacao nao enxerga - que era exatamente a
+* armadilha que fazia o Job terminar sem gerar arquivo.
+  IF p_dsrv = abap_true.
+    MESSAGE 'Destino = servidor: informe um diretorio dos que a AL11 lista. O F4 navega no PC.'
+            TYPE 'S' DISPLAY LIKE 'W'.
+    RETURN.
+  ENDIF.
+
   cl_gui_frontend_services=>directory_browse(
     EXPORTING
       window_title         = 'Pasta onde o Job grava o .xlsx'
@@ -2243,7 +2476,20 @@ FORM agendar_job.
         lv_tm       TYPE sy-uzeit.
 
   IF p_xdir IS INITIAL.
-    MESSAGE 'Informe o diretorio do servidor (bloco do Job).' TYPE 'E'.
+    MESSAGE 'Informe o diretorio do servidor (bloco Arquivo / Job).' TYPE 'E'.
+    RETURN.
+  ENDIF.
+
+* O Job roda no servidor de aplicacao. Uma pasta do PC ("C:\..." ou
+* "\\servidor\...") nao existe para ele - e o job terminaria "Concl."
+* sem gerar arquivo nenhum. Barra aqui, na hora de agendar.
+  DATA lv_ini TYPE string.
+  IF strlen( p_xdir ) >= 2.
+    lv_ini = p_xdir(2).
+  ENDIF.
+  IF lv_ini CS ':' OR lv_ini = '\\'.
+    MESSAGE 'Diretorio de PC nao serve para o Job: ele grava no servidor. Informe um caminho da AL11.'
+            TYPE 'E'.
     RETURN.
   ENDIF.
   IF p_jname IS INITIAL.
@@ -2334,6 +2580,8 @@ FORM agendar_job.
     WITH p_semctr = p_semctr
     WITH p_xdir   = p_xdir
     WITH p_xname  = p_xname
+    WITH p_dsrv   = 'X'
+    WITH p_dpc    = ' '
     WITH p_bg     = 'X'
     VIA JOB p_jname NUMBER lv_jobcount
     AND RETURN.
