@@ -14,9 +14,9 @@ Objetos agrupados, um diretório por transação — cada um com fonte, README e
 
 | Repositório | Objetos |
 |---|---|
-| [**sap-fi-reports**](https://github.com/RafaelPiassi/sap-fi-reports) — FI / CO | ZFI007 · ZFI009N · ZFI009R · ZFI018 · ZFI036 · ZFI037 · ZFI039 · ZFI040 · ZFI044 · ZFI045 · ZFI048 · ZFF67 · ZCO01 |
-| [**sap-mm-reports**](https://github.com/RafaelPiassi/sap-mm-reports) — MM | ZMM113 · ZMM116 · ZMM118 · ZMM198 · ZMMR033 · ZMMR117 · ZMIGO_CARGA_PEDIDO · ZQM022 |
-| [**sap-sd-reports**](https://github.com/RafaelPiassi/sap-sd-reports) — SD | ZSD058 · ZSD117 · ZSD120 · ZSD126 · ZSD127 · ZSD128 · ZVA03 · ZMOSAIC |
+| [**sap-fi-reports**](https://github.com/RafaelPiassi/sap-fi-reports) — FI / CO | ZFI007 · ZFI009N · ZFI009R · ZFI018 · ZFI036 · ZFI037 · ZFI039 · ZFI040 · ZFI044 · ZFI045 · ZFI048 · ZFI053 · ZFI054 · ZFF67 · ZCO01 |
+| [**sap-mm-reports**](https://github.com/RafaelPiassi/sap-mm-reports) — MM | ZMM113 · ZMM116 · ZMM118 · ZMM132 · ZMM198 · ZMMR033 · ZMMR117 · ZMIGO_CARGA_PEDIDO · ZQM022 |
+| [**sap-sd-reports**](https://github.com/RafaelPiassi/sap-sd-reports) — SD | ZSD058 · ZSD117 · ZSD120 · ZSD126 · ZSD127 · ZSD128 · ZVA03 · ZMOSAIC · Z_NFDANFE_PORTRAIT |
 
 ## Repositórios individuais
 
@@ -24,17 +24,20 @@ Objetos maiores, cada um no seu próprio repositório.
 
 ### Basis e administração
 
+Contas, jobs, certificados e a rotina diária de AMS — o que mantém o ambiente de pé.
+
 | Objeto | O que faz |
 |---|---|
 | [ZBC001 — Relação de usuários](https://github.com/RafaelPiassi/sap-zbc001-relacao-usuarios) | Todos os usuários do mandante em ALV: endereço completo, alias de logon, tipo de licença contratual, bloqueio decodificado da `UFLAG` e tipo de usuário. |
 | [ZBC002 — Saneamento de usuários](https://github.com/RafaelPiassi/sap-zbc002-saneamento-usuarios) | Validade máxima de 1 ano, sem logon há 90 dias, expirados. Ajuste individual ou em massa por `BAPI_USER_CHANGE`, carga de endereço por planilha e job diário com e-mail. |
 | [ZBASISCHECK — Check list diário de Basis](https://github.com/RafaelPiassi/sap-zbasischeck-checklist-basis) | Automatiza os 33 itens do check list diário de AMS: 24 verificações automáticas, diagnóstico em ALV, e-mail HTML/CSV e job diário. |
+| [ZJOBS — Monitor e limpeza de jobs](https://github.com/RafaelPiassi/sap-zjobs-monitor-jobs) | A SM37 com ação em massa: cancelar, deletar, iniciar, liberar e reagendar a seleção inteira. Simulação por padrão, proteção dos jobs do SAP, teto por execução e processamento em lotes com `COMMIT` a cada N. |
+| [ZNFECERT — Monitor de certificados NF-e](https://github.com/RafaelPiassi/sap-znfecert-monitor-certificados-nfe) | Monitora os certificados digitais da `NFE_MNG_CERT` e avisa por e-mail 15 dias antes do vencimento, com job diário. |
 
 ### Localização Brasil
 
 | Objeto | O que faz |
 |---|---|
-| [ZNFECERT — Monitor de certificados NF-e](https://github.com/RafaelPiassi/sap-znfecert-monitor-certificados-nfe) | Monitora os certificados digitais da `NFE_MNG_CERT` e avisa por e-mail 15 dias antes do vencimento, com job diário. |
 | [ZFI049 — Inscrição Estadual × Centro](https://github.com/RafaelPiassi/sap-zfi049-inscricao-estadual) | Confere e corrige IE, IM e CNPJ dos locais de negócios (`J_1BBRANCH`) de todos os centros de uma empresa, numa tela só. Aponta IE sem zeros à esquerda. |
 | [ZFI050 — IE dos parceiros do centro](https://github.com/RafaelPiassi/sap-zfi050-ie-parceiros-centro) | Companheira da ZFI049: corrigir a `J_1BBRANCH` arruma o destinatário da NF-e, mas **não** o local de entrega, que vem de `T001W-KUNNR` → `KNA1-STCD3`. Iguala os dois via `CMD_EI_API`/`VMD_EI_API`. |
 
