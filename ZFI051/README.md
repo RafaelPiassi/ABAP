@@ -1,0 +1,265 @@
+# ZFI051 — Contratos de Compra × Vendas (ZSD034)
+
+Programa `ZFIR051`. Módulo FI / SD. Desenvolvedor: RPIASSI — Rafael Piassi.
+
+Cruza os contratos de grãos do cockpit (`ZCOCKPITECC` / `ZFI_WSYS_CAB`) com o
+relatório de carga da **ZSD034**, usando o CPF / CNPJ como chave entre o
+**fornecedor** (compra) e o **cliente** (venda) — ou, no modo separado, entrega
+os dois lados lado a lado sem cruzar nada.
+
+O programa **não refaz** a lógica da ZSD034: ele submete o programa dela
+(`ZSDR006_NEW`, constante `GC_PROG`) com os filtros do bloco de vendas e captura
+a saída em memória pela `CL_SALV_BS_RUNTIME_INFO`. Os números são exatamente os
+que a ZSD034 mostra, e coluna nova que ela ganhar aparece aqui sozinha — o bloco
+de vendas é montado em tempo de execução.
+
+---
+
+## Modos de extração
+
+O bloco **Modo de extração** decide a forma da saída.
+
+### Cruzado (`P_MCRUZ`)
+
+Uma saída só. Bloco do contrato e bloco da ZSD034 na **mesma linha**, ligados
+pelo CPF / CNPJ:
+
+| lado | de onde vem o documento |
+|---|---|
+| compra | `ZFI_WSYS_CAB-CODFORNECEDOR` → `LFA1-STCD1` / `STCD2` |
+| venda | (ZSD034) `KUNNR2` / `KUNNR` → `KNA1-STCD1` / `STCD2` |
+
+A comparação usa só os **dígitos** e separa CNPJ de CPF (`NORM_DOC`), então
+máscara e zeros à esquerda não atrapalham.
+
+É um cruzamento, não um resumo: fornecedor com 3 contratos e 10 linhas de venda
+gera 30 linhas. A coluna **Cruzamento** marca cada linha como `Compra+Venda`,
+`So compra` ou `So venda`.
+
+### Separado (padrão — `P_MSEP`) — sem cruzar compra com venda
+
+**Dois ALVs distintos**, empilhados num splitter sobre docking:
+
+- **de cima** — contratos de compra (as colunas do cockpit + CNPJ, CPF e IE);
+- **de baixo** — a saída da ZSD034, exatamente como ela devolve.
+
+Cada lado obedece só aos **seus** filtros: o de compra ao bloco *Contratos*, o
+de venda ao bloco *Vendas*. Nenhuma linha é multiplicada e nenhuma é descartada
+por falta de par — os dois totais fecham com os relatórios de origem. Cada grid
+tem sua barra de funções, seu layout e seu export próprios.
+
+Neste modo:
+
+- o bloco **Regra do cruzamento** fica cinza (não há cruzamento a regular);
+- a coluna **Cruzamento** some da saída;
+- a ZSD034 é submetida **sem** a restrição de clientes, ou seja, traz o período
+  inteiro do bloco de vendas.
+
+Para conciliar os dois lados manualmente, a chave é o **CNPJ / CPF** — ele está
+nas duas saídas (no ALV de compra como coluna própria; no de venda, via
+`Emissor da Ordem` / `Recebedor mercadoria`).
+
+---
+
+## Arquivo da extração
+
+No modo separado, o bloco **Modo de extração** também escolhe a forma do arquivo:
+
+| opção | resultado |
+|---|---|
+| `P_X1ARQ` | **um** `.xlsx` com **duas abas**: `Compras (Contratos)` e `Vendas (ZSD034)` |
+| `P_X2ARQ` (padrão) | **dois** `.xlsx`: o nome informado ganha os sufixos `_COMPRAS` e `_VENDAS` antes da extensão |
+
+No modo cruzado nada muda: continua um arquivo único, gerado pelo
+`CL_SALV_BS_LEX`.
+
+O arquivo de duas abas é montado no próprio programa (OOXML + `CL_ABAP_ZIP`),
+**sem GUI e sem ABAP2XLSX** — condição para o Job funcionar, já que quem grava é
+o servidor de aplicação. O `CL_SALV_BS_LEX` só gera arquivo de uma aba e OLE /
+DOI exigiria GUI, daí a montagem na unha. O que sai do gerador:
+
+- linha 1 com os títulos em negrito, congelada e com autofiltro;
+- data como data de verdade (número de série do Excel, formato curto), então
+  ordena e filtra como data;
+- número como número, com ponto decimal e sinal à esquerda;
+- texto passando pelo `WRITE ... TO`, para respeitar o exit de conversão do
+  domínio — material, fornecedor e cliente saem como o usuário vê, não com os
+  zeros à esquerda internos;
+- zero é escrito como zero, não como célula vazia (branco se leria como "não
+  informado").
+
+Os títulos das colunas são lidos de uma ALV headless, então são **os mesmos**
+que aparecem na tela — inclusive para colunas novas que a ZSD034 vier a ganhar.
+
+### Destino: servidor ou PC
+
+`P_DSRV` grava no **servidor de aplicação**, por `OPEN DATASET`. `P_DPC` (padrão)
+grava na **estação de trabalho**, por `GUI_DOWNLOAD`.
+
+> **É aqui que quase todo mundo tropeça.** O Job roda no servidor de aplicação,
+> que não enxerga o disco do seu PC. Se você apontar `C:\Users\...\Desktop` com
+> destino "servidor", o job termina com status **Concl.** e **não gera arquivo
+> nenhum** — a falha fica no *spool* do job, não no log. Para o Job, use um
+> caminho dos que a **AL11** lista. O agendamento agora barra caminho de PC na
+> hora de agendar, e o F4 do diretório só navega no PC quando o destino é
+> "estação de trabalho".
+
+Em background o destino é sempre o servidor: gravar no PC exige SAPGUI.
+
+### Quando o arquivo é gerado
+
+- **Sempre** em background — vale tanto o Job agendado pelo botão quanto uma
+  execução solta por F9 / SM36, porque o programa detecta `SY-BATCH`.
+- **Em primeiro plano**, só se `P_GERAR` estiver marcado — e ele vem marcado por
+  padrão. Aí o programa gera o
+  arquivo **e** exibe os ALVs, e informa num popup o que gravou (ou por que não
+  gravou).
+
+### A data de pagamento acompanha a data da OV
+
+`S_DTPAG` (Data do pagamento, bloco **Contratos**) é **obrigatória** e carrega
+sempre o mesmo valor e o mesmo range de `S_AUDAT` (Data de criação da OV, bloco
+**Vendas**) — os dois lados do relatório olham a mesma janela. Por isso ela
+aparece em **exibição**: qualquer valor digitado ali seria sobrescrito no próximo
+PBO, o que só confundiria.
+
+O padrão de ambas, quando a tela abre sem variante, é o **mês corrente**. Sem um
+default, a `S_DTPAG` obrigatória barraria o primeiro Enter antes de o
+espelhamento poder rodar.
+
+O espelhamento roda no PBO da tela **e** no `START-OF-SELECTION` — este segundo
+é o caminho do Job, onde a tela não chega a ser montada e uma variante antiga
+poderia trazer as duas datas divergentes.
+
+> Se um dia as duas precisarem ser independentes, é remover o `MODIF ID pag` do
+> `LOOP AT SCREEN` e a chamada de `SINCRONIZAR_DATAS`.
+
+### Aba vazia continua sendo aba
+
+Os dois lados são independentes: um pode vir vazio e o outro cheio. Quando isso
+acontece, a aba (ou o arquivo) do lado vazio é gerada **assim mesmo, só com o
+cabeçalho** — e a mensagem informa a contagem dos dois lados. Omitir a aba vazia
+era pior: você recebia um arquivo só com a ZSD034 e não tinha como saber se a
+compra veio zerada ou se o programa deixou de gerar.
+
+A única exceção é quando a captura da ZSD034 falha por completo: aí não existe
+nem a estrutura das colunas, então essa aba realmente não tem como ser montada —
+e a mensagem diz isso.
+
+> Se o lado da compra vier zerado, o filtro a conferir é o do bloco
+> **Contratos**. Como a *Data do pagamento* acompanha a data da OV, zero
+> contratos significa que nenhum contrato tem data de pagamento dentro dessa
+> janela — o que é esperado para contrato ainda não pago, já que o campo fica
+> vazio. Restrinja mais pelos outros filtros (fornecedor, centro, safra) ou
+> confira o conteúdo da `ZFI_WSYS_CAB` na SE16N.
+
+### Onde aparecem as mensagens
+
+Em background as mensagens vão para a **lista do job**, que fica no **spool** —
+não no log do job. Em primeiro plano elas saem juntas num popup. Se o job
+terminar sem arquivo, o motivo está no spool: SM37 → selecione o job → botão
+**Spool**.
+
+---
+
+## Job de extração automática
+
+Bloco **Job**: diretório (com F4), nome do arquivo, data/hora da primeira
+execução e a **periodicidade definida pelo usuário** — a cada N minutos, horas,
+dias, semanas ou meses; `N = 0` agenda uma execução única.
+
+| botão | o que faz |
+|---|---|
+| Agendar Job de extração | cria o agendamento recorrente com a seleção da tela |
+| Cancelar agendamento | remove os agendamentos futuros (não mexe no que já rodou) |
+| Situação do agendamento | mostra quantos agendamentos há e a próxima execução |
+
+O modo de extração e a forma do arquivo viajam na seleção: o Job gera exatamente
+o que a tela está pedindo.
+
+Se a data e a hora da primeira execução já tiverem passado, o job **arranca na
+hora** (`STRTIMMED`) em vez de ser empurrado para o próximo horário — esperar não
+faz sentido quando o instante pedido já foi. A periodicidade continua valendo, a
+partir dessa execução imediata. Se não houver processo de background livre no
+momento (`CANT_START_IMMEDIATE`), o programa agenda para daqui a um minuto em vez
+de devolver erro e perder o agendamento.
+
+No nome do arquivo valem os curingas `&DATA&` (AAAAMMDD) e `&HORA&` (HHMMSS).
+Sem curinga, cada execução **sobrescreve** o mesmo arquivo.
+
+> O F4 do diretório navega no PC do usuário, mas quem grava é o **servidor de
+> aplicação** (`OPEN DATASET`). O caminho precisa existir e ser gravável por ele
+> — confira na **AL11**.
+
+---
+
+## Tela de seleção
+
+| Bloco | Campos |
+|---|---|
+| **Contratos** | `P_BUKRS` (obrigatório), contrato, data do contrato, **data de pagamento (obrigatória, espelhada da data da OV)**, safra, fornecedor, centro, CNPJ, CPF, IE, status |
+| **Vendas** | data de criação da OV (obrigatório), documento, org. vendas, canal, setor, escritório, equipe, tipo de OV, ano-safra, centro, material, grupo de mercadorias |
+| **Modo de extração** | cruzado × separado (padrão: separado); um arquivo de duas abas × dois arquivos (padrão: dois arquivos) |
+| **Regra do cruzamento** | casa por Emissor da ordem (AG) / Recebedor (WE) / qualquer um; trazer contrato sem venda; trazer venda sem contrato |
+| **Arquivo / Job** | destino (servidor × PC), gerar nesta execução, diretório, nome do arquivo, nome do job, data/hora inicial, periodicidade |
+
+---
+
+## Tabelas e objetos envolvidos
+
+`ZFI_WSYS_CAB` (contratos do cockpit) · `LFA1` · `KNA1` · `T001W` · `TBTCO` ·
+`VBAK` / `VBAP` / `MARA` (só como referência de tipo dos SELECT-OPTIONS).
+
+Programa submetido: **`ZSDR006_NEW`** (o programa por trás da ZSD034).
+
+Classes: `CL_SALV_TABLE`, `CL_SALV_BS_RUNTIME_INFO`, `CL_SALV_BS_LEX`,
+`CL_SALV_EX_UTIL`, `CL_SALV_CONTROLLER_METADATA`, `CL_GUI_DOCKING_CONTAINER`,
+`CL_GUI_SPLITTER_CONTAINER`, `CL_ABAP_ZIP`, `CL_ABAP_CONV_OUT_CE`, RTTI
+(`CL_ABAP_STRUCTDESCR` / `CL_ABAP_TABLEDESCR`).
+
+---
+
+## Instalação
+
+1. **SE38** — criar o programa `ZFIR051` e colar o fonte de `ZFIR051.abap`.
+2. **SE38 → Ir para → Elementos de texto → Símbolos de texto**, cadastrar:
+
+   | Símbolo | Texto |
+   |---|---|
+   | `B01` | Contratos |
+   | `B02` | Vendas (ZSD034) |
+   | `B03` | Regra do cruzamento |
+   | `B04` | Arquivo e Job de extração automática |
+   | `B05` | Modo de extração |
+
+   E os textos de seleção dos parâmetros novos:
+
+   | Nome | Texto |
+   |---|---|
+   | `P_MCRUZ` | Cruzar compra x venda |
+   | `P_MSEP` | Dois ALVs, sem cruzar |
+   | `P_X1ARQ` | Arquivo único, duas abas |
+   | `P_X2ARQ` | Dois arquivos separados |
+   | `P_DSRV` | Destino: servidor (AL11) |
+   | `P_DPC` | Destino: estação de trabalho |
+   | `P_GERAR` | Gerar arquivo nesta execução |
+
+3. **SE93** — criar a transação `ZFI051` apontando para o programa `ZFIR051`.
+
+### Premissas do ambiente (confirmar antes de usar em produção)
+
+- A transação **ZSD034** aponta para o programa `ZSDR006_NEW`. Se apontar para
+  outro (veja na SE93), troque **só** a constante `GC_PROG`.
+- A ZSD034 tem os SELECT-OPTIONS `S_AUDAT`, `S_VBELN`, `S_VKORG`, `S_VTWEG`,
+  `S_SPART`, `S_VKBUR`, `S_VKGRP`, `S_AUART`, `S_ANOSF`, `S_WERKS`, `S_MATNR`,
+  `S_MATKL` e `S_KUNNR` — são esses os nomes usados no `SUBMIT`.
+- A saída da ZSD034 traz as colunas `KUNNR` (recebedor) e `KUNNR2` (emissor da
+  ordem), que são o elo com o contrato no modo cruzado.
+- A tabela `ZFI_WSYS_CAB` tem os campos `CODIGOEMPRESA`, `CENTRO`,
+  `NR_CONTRATO`, `CODFORNECEDOR`, `DT_CONTRATO`, `DATAPAGAMENTO`, `ANOSAFRA`,
+  `QUANTIDADE`, `VALOR_CONTRATO` e `STATUS`.
+- O diretório do Job existe no servidor de aplicação e é gravável por ele
+  (AL11).
+
+Colunas da ZSD034 que não estiverem na lista de títulos (`CARREGAR_LABELS`) saem
+com o nome técnico do campo — e continuam aparecendo no relatório.
